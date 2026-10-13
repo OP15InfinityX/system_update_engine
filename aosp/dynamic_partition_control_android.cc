@@ -85,8 +85,6 @@ constexpr char kVirtualAbCompressionEnabled[] =
     "ro.virtual_ab.compression.enabled";
 constexpr auto&& kVirtualAbCompressionXorEnabled =
     "ro.virtual_ab.compression.xor.enabled";
-constexpr char kVirtualAbUserspaceSnapshotsEnabled[] =
-    "ro.virtual_ab.userspace.snapshots.enabled";
 
 // Currently, android doesn't have a retrofit prop for VAB Compression. However,
 // struct FeatureFlag forces us to determine if a feature is 'retrofit'. So this
@@ -138,8 +136,6 @@ DynamicPartitionControlAndroid::DynamicPartitionControlAndroid(
                                              kVirtualAbCompressionRetrofit)),
       virtual_ab_compression_xor_(
           GetFeatureFlag(kVirtualAbCompressionXorEnabled, "")),
-      virtual_ab_userspace_snapshots_(
-          GetFeatureFlag(kVirtualAbUserspaceSnapshotsEnabled, nullptr)),
       source_slot_(source_slot) {
   if (GetVirtualAbFeatureFlag().IsEnabled()) {
     snapshot_ = SnapshotManager::New();
@@ -409,6 +405,16 @@ DynamicPartitionControlAndroid::LoadMetadataBuilder(
                  << BootControlInterface::SlotName(source_slot) << " in "
                  << super_device;
     return nullptr;
+  }
+  // The super table already on the device can record a smaller size than
+  // the real partition, for example when an earlier install was made for a
+  // different super size. The payload then does not fit in the recorded size
+  // even though the device has room for it.
+  // So in recovery, grow the recorded size to match the real device size.
+  // It never shrinks.
+  if (IsRecovery() && builder->GrowBlockDevicesToLiveSize(PartitionOpener())) {
+    LOG(INFO) << "Raised recorded super size to the live device size in "
+              << super_device;
   }
   LOG(INFO) << "Created metadata for new update from slot "
             << BootControlInterface::SlotName(source_slot) << " in "
@@ -1577,11 +1583,6 @@ bool DynamicPartitionControlAndroid::IsDynamicPartition(
 bool DynamicPartitionControlAndroid::UpdateUsesSnapshotCompression() {
   return GetVirtualAbFeatureFlag().IsEnabled() &&
          GetSnapshotManager()->UpdateUsesSnapuserd();
-}
-
-FeatureFlag
-DynamicPartitionControlAndroid::GetVirtualAbUserspaceSnapshotsFeatureFlag() {
-  return virtual_ab_userspace_snapshots_;
 }
 
 }  // namespace chromeos_update_engine
